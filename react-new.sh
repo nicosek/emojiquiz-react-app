@@ -23,7 +23,7 @@ rm -rf src/assets
 rm -f src/index.css
 
 # 📁 Création des dossiers de structure
-mkdir -p src/components src/pages src/hooks src/routes src/stores src/utils src/contexts src/api src/components/SignupModal src/components/LoginModal src/components/Layout src/components/Header src/pages/Home
+mkdir -p src/components src/pages src/hooks src/routes src/stores src/utils src/contexts src/api src/components/SignupModal src/components/LoginModal src/components/Layout src/components/Header src/pages/Home src/pages/NotFound src/components/Loader
 
 # 🎨 App.css
 cat > src/App.css <<EOF
@@ -31,6 +31,8 @@ cat > src/App.css <<EOF
   --primary-color: #e62429;
   --secondary-color: #202020;
   --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  
+  --header-height: 80px;
 }
 
 *,
@@ -70,16 +72,47 @@ select,
 textarea {
   font-family: inherit;
 }
+.toast {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1rem 2rem;
+  border-radius: 8px;
+  font-weight: bold;
+  color: white;
+  font-size: 1rem;
+  z-index: 999;
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+  max-width: 80vw;
+  min-width: 200px;
+  text-align: center;
+}
+
+.toast-success {
+  background-color: #2ecc71;
+}
+
+.toast-error {
+  background-color: #e74c3c;
+}
+
+.toast-warning {
+  background-color: #f39c12;
+}
+
 EOF
 
 # ⚛️ App.jsx
 cat > src/App.jsx <<EOF
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
+import { ROUTES } from "./routes";
 import "./App.css";
 
 // Providers
 import { AuthProvider } from "./contexts/AuthContext";
 import { ModalProvider } from "./contexts/ModalContext";
+import { ToastProvider } from "./contexts/ToastContext";
 
 // UI Components
 import Layout from "./components/Layout/Layout";
@@ -88,21 +121,31 @@ import LoginModal from "./components/LoginModal/LoginModal";
 
 // Pages
 import Home from "./pages/Home/Home";
+import NotFound from "./pages/NotFound/NotFound";
+
+const AppContent = () => {
+  return (
+    <Router>
+      <SignupModal />
+      <LoginModal />
+      <Routes>
+        <Route element={<Layout />}>
+          <Route path={ROUTES.home} element={<Home />} />
+          <Route path={ROUTES.notFound} element={<NotFound />} />
+        </Route>
+      </Routes>
+    </Router>
+  );
+};
 
 const App = () => {
   return (
     <AuthProvider>
-      <ModalProvider>
-        <Router>
-          <SignupModal />
-          <LoginModal />
-          <Routes>
-            <Route element={<Layout />}>
-              <Route path="/" element={<Home />} />
-            </Route>
-          </Routes>
-        </Router>
-      </ModalProvider>
+      <ToastProvider>
+        <ModalProvider>
+          <AppContent />
+        </ModalProvider>
+      </ToastProvider>
     </AuthProvider>
   );
 };
@@ -180,6 +223,7 @@ cat > index.html <<EOF
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${PROJECT_NAME}</title>
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
     <link rel="stylesheet" href="/reset.css" />
   </head>
   <body>
@@ -197,21 +241,40 @@ export const API_URL = "http://localhost:3000"; // à adapter
 export const ${UPPER_NAME}_AUTH_TOKEN_COOKIE_NAME = "${PROJECT_NAME}_auth_token";
 EOF
 
+# src/routes.js
+cat > src/routes.js <<EOF
+export const ROUTES = {
+  home: "/",
+  notFound: "*",
+};
+EOF
+
+
 # AuthContext.jsx
 cat > src/contexts/AuthContext.jsx <<EOF
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
 import Cookies from "js-cookie";
 import { ${UPPER_NAME}_AUTH_TOKEN_COOKIE_NAME } from "../config";
 
-// Création du contexte
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
-  const [token, setToken] = useState(Cookies.get(${UPPER_NAME}_AUTH_TOKEN_COOKIE_NAME) || null);
-  const [userData, setUserData] = useState(() => {
-    const stored = localStorage.getItem("userData");
-    return stored ? JSON.parse(stored) : null;
-  });
+  const [token, setToken] = useState(null);
+  const [userData, setUserData] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Initialisation au chargement de l'app
+  useEffect(() => {
+    const storedToken = Cookies.get(${UPPER_NAME}_AUTH_TOKEN_COOKIE_NAME);
+    const storedUser = localStorage.getItem("userData");
+
+    if (storedToken && storedUser) {
+      setToken(storedToken);
+      setUserData(JSON.parse(storedUser));
+    }
+
+    setIsLoading(false); // Fin du chargement
+  }, []);
 
   const handleLogin = (token, userData) => {
     Cookies.set(${UPPER_NAME}_AUTH_TOKEN_COOKIE_NAME, token, { expires: 3 });
@@ -228,7 +291,16 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ token, userData, setUserData, handleLogin, handleLogout }}>
+    <AuthContext.Provider
+      value={{
+        token,
+        userData,
+        setUserData,
+        handleLogin,
+        handleLogout,
+        isLoading,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -280,6 +352,43 @@ export const useModal = () => {
 };
 EOF
 
+# ToastContext.jsx
+cat > src/contexts/ToastContext.jsx <<EOF
+import { createContext, useContext, useState } from "react";
+
+const ToastContext = createContext();
+
+export const ToastProvider = ({ children }) => {
+  const [toast, setToast] = useState(null); // { message, type }
+
+  const showToast = (message, type = "success") => {
+    setToast({ message, type });
+
+    // Auto dismiss après 3s
+    setTimeout(() => {
+      setToast(null);
+    }, 3000);
+  };
+
+  return (
+    <ToastContext.Provider value={{ showToast }}>
+      {children}
+      {toast && (
+        <div className={\`toast toast-\${toast.type}\`}>{toast.message}</div>
+      )}
+    </ToastContext.Provider>
+  );
+};
+
+export const useToast = () => {
+  const context = useContext(ToastContext);
+  if (!context) {
+    throw new Error("useToast must be used within a ToastProvider");
+  }
+  return context;
+};
+EOF
+
 # api/client.js
 cat > src/api/client.js <<EOF
 import axios from "axios";
@@ -323,11 +432,14 @@ import { useState } from "react";
 import { signup } from "../../api/auth";
 import { useAuth } from "../../contexts/AuthContext";
 import { useModal } from "../../contexts/ModalContext";
+import { handleApiError } from "../../utils/apiErrorHandler";
+import { useToast } from "../../contexts/ToastContext";
 import "./SignupModal.css";
 
 const SignupModal = () => {
   const { isSignupModalOpen, openLoginModal, closeModals } = useModal();
   const { handleLogin } = useAuth();
+  const { showToast } = useToast();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -339,17 +451,20 @@ const SignupModal = () => {
     event.preventDefault();
     setError("");
 
+    let data;
     try {
-      const data = await signup({ email, password });
-
-      if (data.token && data.user) {
-        handleLogin(data.token, data.user);
-        handleClose();
-      } else {
-        setError("Aucun token reçu.");
-      }
+      data = await signup({ email, password });
     } catch (err) {
-      setError(err.response?.data?.message || "Une erreur est survenue.");
+      setError(handleApiError(err));
+      return;
+    }
+
+    if (data.token && data.user) {
+      handleLogin(data.token, data.user);
+      handleClose();
+      showToast("Signed up successfully", "success");
+    } else {
+      setError("No token received.");
     }
   };
 
@@ -366,11 +481,11 @@ const SignupModal = () => {
         <button className="modal-close" onClick={handleClose}>
           ✖
         </button>
-        <h2>S'inscrire</h2>
+        <h2>Sign up</h2>
         <form className="modal-form" onSubmit={handleSubmit}>
           <input
             type="email"
-            placeholder="Adresse email"
+            placeholder="Email address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
@@ -378,25 +493,25 @@ const SignupModal = () => {
 
           <input
             type="password"
-            placeholder="Mot de passe"
+            placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
           />
 
           <p className="newsletter-info">
-            En m'inscrivant je confirme avoir lu et accepté les{" "}
-            <a href="#">Termes & Conditions</a> et{" "}
-            <a href="#">Politique de Confidentialité</a>. <br />
-            Je confirme avoir au moins 18 ans.
+            By signing up, I confirm I have read and agree to the{" "}
+            <a href="#">Terms & Conditions</a> and{" "}
+            <a href="#">Privacy Policy</a>. <br />I confirm I am at least 18
+            years old.
           </p>
 
           {error && <p className="error-message">{error}</p>}
 
-          <button type="submit">S'inscrire</button>
+          <button type="submit">Sign up</button>
 
           <p className="modal-footer">
-            Tu as déjà un compte ?{" "}
+            Already have an account?{" "}
             <span
               className="switch-modal"
               onClick={() => {
@@ -404,7 +519,7 @@ const SignupModal = () => {
                 openLoginModal();
               }}
             >
-              Connecte-toi ici
+              Log in here
             </span>
           </p>
         </form>
@@ -414,6 +529,7 @@ const SignupModal = () => {
 };
 
 export default SignupModal;
+
 EOF
 
 # SignupModal.css
@@ -549,11 +665,14 @@ import { useState } from "react";
 import { login } from "../../api/auth";
 import { useAuth } from "../../contexts/AuthContext";
 import { useModal } from "../../contexts/ModalContext";
+import { handleApiError } from "../../utils/apiErrorHandler";
+import { useToast } from "../../contexts/ToastContext";
 import "./LoginModal.css";
 
 const LoginModal = () => {
   const { isLoginModalOpen, openSignupModal, closeModals } = useModal();
   const { handleLogin } = useAuth();
+  const { showToast } = useToast();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -565,17 +684,20 @@ const LoginModal = () => {
     e.preventDefault();
     setError("");
 
+    let data;
     try {
-      const data = await login({ email, password });
-
-      if (data.token && data.user) {
-        handleLogin(data.token, data.user);
-        handleClose();
-      } else {
-        setError("Aucun token reçu.");
-      }
+      data = await login({ email, password });
     } catch (err) {
-      setError(err.response?.data?.message || "Une erreur est survenue.");
+      setError(handleApiError(err));
+      return;
+    }
+
+    if (data.token && data.user) {
+      handleLogin(data.token, data.user);
+      handleClose();
+      showToast("Logged in successfully", "success");
+    } else {
+      setError("No token received.");
     }
   };
 
@@ -592,11 +714,11 @@ const LoginModal = () => {
         <button className="modal-close" onClick={handleClose}>
           ✖
         </button>
-        <h2>Se connecter</h2>
+        <h2>Login</h2>
         <form className="modal-form" onSubmit={handleSubmit}>
           <input
             type="email"
-            placeholder="Adresse email"
+            placeholder="Email address"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
@@ -604,7 +726,7 @@ const LoginModal = () => {
 
           <input
             type="password"
-            placeholder="Mot de passe"
+            placeholder="Password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
@@ -612,10 +734,10 @@ const LoginModal = () => {
 
           {error && <p className="error-message">{error}</p>}
 
-          <button type="submit">Se connecter</button>
+          <button type="submit">Login</button>
 
           <p className="modal-footer">
-            Pas encore de compte ?{" "}
+            Don't have an account?{" "}
             <span
               className="switch-modal"
               onClick={() => {
@@ -623,7 +745,7 @@ const LoginModal = () => {
                 openSignupModal();
               }}
             >
-              Inscris-toi !
+              Sign up!
             </span>
           </p>
         </form>
@@ -633,6 +755,7 @@ const LoginModal = () => {
 };
 
 export default LoginModal;
+
 EOF
 
 # LoginModal.css
@@ -640,25 +763,85 @@ cat > src/components/LoginModal/LoginModal.css <<EOF
 @import "../SignupModal/SignupModal.css";
 EOF
 
+# Loader.jsx
+cat > src/components/Loader/Loader.jsx <<EOF
+import "./Loader.css";
+
+const Loader = () => {
+  return (
+    <div className="loader-container">
+      <div className="loader"></div>
+    </div>
+  );
+};
+
+export default Loader;
+EOF
+
+# Loader.css
+cat > src/components/Loader/Loader.css <<EOF
+.loader-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.loader {
+  width: 50px;
+  height: 50px;
+  border: 6px solid #ccc;
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+EOF
+
 # Layout.jsx
 cat > src/components/Layout/Layout.jsx <<EOF
 import Header from "../Header/Header";
 import SignupModal from "../SignupModal/SignupModal";
 import LoginModal from "../LoginModal/LoginModal";
+import Loader from "../Loader/Loader";
 import { Outlet } from "react-router-dom";
+import { useAuth } from "../../contexts/AuthContext";
+import "./Layout.css";
 
 const Layout = () => {
+  const { isLoading } = useAuth();
+
   return (
     <>
       <Header />
       <SignupModal />
       <LoginModal />
-      <Outlet />
+      {isLoading ? (
+        <div className="layout-loader-wrapper">
+          <Loader />
+        </div>
+      ) : (
+        <Outlet />
+      )}
     </>
   );
 };
 
 export default Layout;
+EOF
+
+# Layout.css
+cat > src/components/Layout/Layout.css <<EOF
+.layout-loader-wrapper {
+  width: 100%;
+  height: calc(100vh - var(--header-height));
+}
 EOF
 
 # Header.jsx
@@ -711,11 +894,13 @@ EOF
 cat > src/components/Header/AuthButtons.jsx <<EOF
 import { useModal } from "../../contexts/ModalContext";
 import { useAuth } from "../../contexts/AuthContext";
+import { useToast } from "../../contexts/ToastContext";
 import "./AuthButtons.css";
 
 const AuthButtons = () => {
   const { openLoginModal, openSignupModal } = useModal();
   const { token, handleLogout } = useAuth();
+  const { showToast } = useToast();
 
   return (
     <div className="auth-buttons">
@@ -724,7 +909,10 @@ const AuthButtons = () => {
           <button
             type="button"
             className="auth-btn logout"
-            onClick={handleLogout}
+            onClick={() => {
+              handleLogout();
+              showToast("Logged out successfully", "success");
+            }}
           >
             Logout
           </button>
@@ -836,6 +1024,43 @@ cat > src/pages/Home/Home.css <<EOF
 }
 EOF
 
+# NotFound.jsx
+cat > src/pages/NotFound/NotFound.jsx <<EOF
+import "./NotFound.css";
+
+const NotFound = () => {
+  return (
+    <div className="notfound">
+      <h1>404</h1>
+      <p>Oops, this page doesn’t exist…</p>
+    </div>
+  );
+};
+
+export default NotFound;
+EOF
+
+
+# NotFound.css
+cat > src/pages/NotFound/NotFound.css <<EOF
+.notfound {
+  text-align: center;
+  padding: 4rem;
+}
+
+.notfound h1 {
+  font-size: 5rem;
+  color: var(--primary-color);
+  margin-bottom: 1rem;
+}
+
+.notfound p {
+  font-size: 1.5rem;
+  color: var(--secondary-color);
+}
+EOF
+
+
 # Logo.jsx
 cat > src/components/Header/Logo.jsx <<EOF
 import "./Logo.css";
@@ -869,6 +1094,22 @@ cat > src/components/Header/Logo.css <<EOF
   display: block;
 }
 EOF
+
+# apiErrorHandler.js
+cat > src/utils/apiErrorHandler.js <<EOF
+export const handleApiError = (error) => {
+  const status = error.response?.status;
+  const message =
+    error.response?.data?.message ||
+    error.message ||
+    "An unexpected error occurred.";
+
+  console.error(\`[API Error \${status || "??"}]\`, message);
+
+  return message;
+};
+EOF
+
 
 
 
