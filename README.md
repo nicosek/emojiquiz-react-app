@@ -16,6 +16,36 @@ This project provides a **clean and fully operational React + Vite boilerplate**
 
 ---
 
+---
+
+## 🚀 Quick Start
+
+To get started with this boilerplate:
+
+```bash
+git clone https://github.com/nicosek/react-new.git
+cd react-new
+chmod +x react-new.sh
+./react-new.sh my-app
+cd my-app
+```
+
+Then, create a `.env` file in the root directory and define your backend API URL:
+
+```env
+VITE_API_URL=http://localhost:3000
+```
+
+Start the development server:
+
+```bash
+yarn dev
+```
+
+Visit [http://localhost:5173](http://localhost:5173) to view the homepage.
+
+---
+
 <details>
 <summary>✅ Authentication System</summary>
 
